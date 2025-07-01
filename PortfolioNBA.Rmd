@@ -1,0 +1,167 @@
+---
+title: "portfolio2"
+output: html_document
+date: "2025-07-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(shiny)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(bslib)
+
+#load Data
+stats_all <- read.csv(
+  "~/Desktop/Stat 240/data/PlayerStatistics.csv",
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    GameDate = ymd_hms(gameDate),
+    Player   = paste(firstName, lastName),
+    season   = if_else(
+      month(GameDate) >= 10,
+      year(GameDate),
+      year(GameDate) - 1
+    )
+  )
+
+# UI
+ui <- fluidPage(
+  theme = bs_theme(
+    version    = 4,
+    bootswatch = "flatly",
+    base_font  = font_google("Lato")
+  ),
+
+  titlePanel("2k NBA Top-10 Impact Explorer"),
+
+  sidebarLayout(
+    sidebarPanel(
+      helpText(
+        "1️⃣ Pick a season (by its starting year).",
+        "2️⃣ Choose Win Rate or Plus/Minus.",
+        "3️⃣ Compare that season’s top-10 scorers."
+      ),
+      sliderInput(
+        "season", "Season Starting Year",
+        min   = 2000, max = 2024,
+        value = 2024, step = 1, sep = ""
+      ),
+      selectInput(
+        "metric", "Metric:",
+        choices = c(
+          "Win Rate"                = "win_rate",
+          "Plus/Minus Distribution" = "plusMinusPoints"
+        ),
+        selected = "win_rate"
+      ),
+      uiOutput("player_select")
+    ),
+
+    mainPanel(
+      plotOutput("impactPlot", height = "600px")
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+
+  season_data <- reactive({
+    req(input$season)
+    stats_all %>%
+      filter(
+        season   == input$season,
+        gameType == "Regular Season"
+      )
+  })
+
+  top_players <- reactive({
+    season_data() %>%
+      group_by(Player) %>%
+      summarise(ppg = mean(points, na.rm = TRUE)) %>%
+      arrange(desc(ppg)) %>%
+      slice_head(n = 10) %>%
+      pull(Player)
+  })
+
+  output$player_select <- renderUI({
+    req(top_players())
+    selectInput(
+      "players", "Top-10 Scorers:",
+      choices  = top_players(),
+      selected = top_players(),
+      multiple = TRUE,
+      selectize = TRUE
+    )
+  })
+
+  summary_data <- reactive({
+    req(input$players)
+    df <- season_data() %>% filter(Player %in% input$players)
+
+    if (input$metric == "win_rate") {
+      df %>%
+        group_by(Player) %>%
+        summarise(Value = mean(win, na.rm = TRUE))
+    } else {
+      df %>% select(Player, Value = plusMinusPoints)
+    }
+  })
+
+  output$impactPlot <- renderPlot({
+    sd    <- summary_data()
+    gridc <- "#DDDDDD"  # light gray grid
+
+    if (input$metric == "win_rate") {
+      ggplot(sd, aes(x = reorder(Player, Value), y = Value)) +
+        geom_col(fill = "#2C3E50") +
+        coord_flip() +
+        labs(
+          title = "Season Win Rates",
+          x     = NULL,
+          y     = "Win Rate"
+        ) +
+        theme_minimal(base_family = "Lato") +
+        theme(
+          plot.background  = element_rect(fill = "white", colour = NA),
+          panel.background = element_rect(fill = "white", colour = NA),
+          panel.grid.major = element_line(colour = gridc),
+          panel.grid.minor = element_blank(),
+          axis.text        = element_text(color = "#2C3E50"),
+          plot.title       = element_text(size = 20, face = "bold", color = "#2C3E50")
+        )
+
+    } else {
+      ggplot(sd, aes(x = Player, y = Value)) +
+        geom_boxplot(fill = "#18BC9C", alpha = 0.7) +
+        coord_flip() +
+        labs(
+          title = "Game-by-Game Plus/Minus",
+          x     = NULL,
+          y     = "+/–"
+        ) +
+        theme_minimal(base_family = "Lato") +
+        theme(
+          plot.background  = element_rect(fill = "white", colour = NA),
+          panel.background = element_rect(fill = "white", colour = NA),
+          panel.grid.major = element_line(colour = gridc),
+          panel.grid.minor = element_blank(),
+          axis.text        = element_text(color = "#2C3E50"),
+          plot.title       = element_text(size = 20, face = "bold", color = "#2C3E50")
+        )
+    }
+  })
+}
+
+
+shinyApp(ui, server)
+
+
+```
+
